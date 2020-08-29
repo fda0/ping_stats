@@ -20,3 +20,10 @@ typedef double f64;
 #define global_variable static
 #define local_persist static
 
+#define Array_Count(Array) (sizeof(Array) / sizeof(*(Array)))
+
+#define Minimum(A, B) (A > B ? B : A)
+
+
+
+

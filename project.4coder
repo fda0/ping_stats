@@ -1,0 +1,41 @@
+version(1);
+project_name = "CmdPingStats";
+patterns = {
+"*.c",
+"*.cpp",
+"*.h",
+"*.m",
+"*.bat",
+"*.sh",
+"*.4coder",
+};
+blacklist_patterns = {
+".*",
+};
+load_paths_base = {
+ { ".", .relative = true, .recursive = true, },
+};
+load_paths = {
+ { load_paths_base, .os = "win", },
+};
+
+command_list = {
+ { .name = "build",
+   .out = "*compilation*", .footer_panel = true, .save_dirty_files = true,
+   .cmd = { { "misc\\stats_build.bat" , .os = "win"   }, },
+ },
+
+ { .name = "build_release",
+   .out = "*compilation*", .footer_panel = true, .save_dirty_files = true,
+   .cmd = { { "misc\\stats_build.bat release" , .os = "win"   }, },
+ },
+	
+ { .name = "debug",
+   .cmd = { { "remedybg debug_session.rdbg" , .os = "win"   }, }, },
+
+};
+
+fkey_command[7] = "build";
+fkey_command[8] = "build_release";
+
+fkey_command[10] = "debug";
