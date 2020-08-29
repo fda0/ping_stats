@@ -64,10 +64,9 @@ s32 get_ping_value(const char *command_result, s32 default_value)
 
 struct History
 {
-    s32 values[8];
-    u32 filled_big;
-    u32 filled_small;
-    u32 current_index;
+    s32 filled_big;
+    s32 filled_small;
+    s32 current_index;
     
     s32 big_sum;
     s32 big_avg;
@@ -79,21 +78,28 @@ struct History
 };
 
 internal void
-update_history(History *h, s32 new_value, s32 limit)
+update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
+               s32 new_value)
 {
-    //printf("array_count: %lld, filled_big: %d\n", Array_Count(h->values), h->filled_big);
-    s32 last_value = h->values[h->current_index];
-    s32 last_limit = (last_value > limit) ? 1 : 0;
-    
-    if (h->filled_big == Array_Count(h->values))
+    if (h->filled_big == big_size)
     {
+        s32 last_value = values[h->current_index];
+        s32 last_limit = (last_value > limit) ? 1 : 0;
+        
         h->big_sum -= last_value;
         h->big_limit -= last_limit;
     }
     else ++h->filled_big;
     
-    if (h->filled_small == Minimum(4, Array_Count(h->values)))
+    
+    if (h->filled_small == small_size)
     {
+        s32 last_index = h->current_index - small_size;
+        if (last_index < 0) last_index += big_size;
+        
+        s32 last_value = values[last_index];
+        s32 last_limit = (last_value > limit) ? 1 : 0;
+        
         h->small_sum -= last_value;
         h->small_limit -= last_limit;
     }
@@ -101,7 +107,7 @@ update_history(History *h, s32 new_value, s32 limit)
     
     
     
-    h->values[h->current_index] = new_value;
+    values[h->current_index] = new_value;
     
     h->big_sum += new_value;
     h->small_sum += new_value;
@@ -115,23 +121,98 @@ update_history(History *h, s32 new_value, s32 limit)
     
     
     
-    if (++h->current_index >= Array_Count(h->values))
+    if (++h->current_index >= big_size)
     {
         h->current_index = 0;
     }
 }
 
-
-int main()
+enum Input_Mode
 {
-#define USER_STRING_SIZE 256
-    char domain[USER_STRING_SIZE] = "google.com";
+    InputMode_None,
+    InputMode_Timeout,
+    InputMode_Small,
+    InputMode_Big,
+    InputMode_Limit
+};
+
+int main(int argument_count, char **arguments)
+{
+    char domain[1024] = "google.com";
     s32 ping_period = 1000;
+    s32 big_size = 60*60;
+    s32 small_size = 60*2;
+    s32 limit = 200;
     
-    char command[USER_STRING_SIZE];
+    Input_Mode mode = InputMode_None;
+    
+    for (s32 arg_index = 1;
+         arg_index < argument_count;
+         ++arg_index)
+    {
+        char *arg = arguments[arg_index];
+        
+        if (mode == InputMode_None)
+        {
+            if (arg[0] == '-' || arg[0] == '/' || arg[0] == '?')
+            {
+                if (arg[0] == '?' || arg[1] == 'h' || arg[1] == '?')
+                {
+                    printf("Usage: pint_stats [-w timeout] [-b big_size]\n"
+                           "                  [-s small_size] [-l limit]\n"
+                           "                  [target_domain_name]\n");
+                    exit(0);
+                }
+                else if (arg[1] == 'w') mode = InputMode_Timeout;
+                else if (arg[1] == 'b') mode = InputMode_Big;
+                else if (arg[1] == 's') mode = InputMode_Small;
+                else if (arg[1] == 'l') mode = InputMode_Limit;
+                else 
+                {
+                    printf("unknown switch, use -h, ? or /? for help\n");
+                    exit(0);
+                }
+            }
+            else
+            {
+                strncpy(domain, arg, Array_Count(domain) - 1);
+                domain[Array_Count(domain) - 1] = 0;
+            }
+        }
+        else if (mode == InputMode_Timeout ||
+                 mode == InputMode_Big ||
+                 mode == InputMode_Small ||
+                 mode == InputMode_Limit)
+        {
+            s32 value = atoi(arg);
+            if (value <= 0)
+            {
+                printf("incorrect numerical value: %s\n", arg);
+            }
+            else
+            {
+                if (mode == InputMode_Timeout) ping_period = value;
+                else if (mode == InputMode_Big) big_size = value;
+                else if (mode == InputMode_Small) small_size = value;
+                else if (mode == InputMode_Limit) limit = value;
+            }
+            
+            mode = InputMode_None;
+        }
+    }
+    
+    small_size = Minimum(small_size, big_size);
+    s32 *ping_array = (s32 *)malloc(big_size*sizeof(s32));
+    History history = {};
+    
+    printf("Starting with settings: small_size: %d, big_size %d, limit: %d\n"
+           "domain: %s\n",
+           small_size, big_size, limit, domain);
+    
+    
+    char command[2048];
     snprintf(command, sizeof(command), "ping -n 1 -w %d %s", ping_period, domain); 
     
-    History history = {};
     
     
     u32 next_time_target = GetTickCount() + ping_period;
@@ -141,7 +222,7 @@ int main()
         char command_result[512];
         run_command(command, command_result, sizeof(command_result));
         s32 ping = get_ping_value(command_result, ping_period);
-        update_history(&history, ping, 200);
+        update_history(&history, ping_array, big_size, small_size, limit, ping);
         
         // printing
         printf("ping: %dms\ts_avg: %dms\ts_lim: %d\t\tb_avg: %dms\tb_lim: %d\n", ping, history.small_avg, history.small_limit, history.big_avg, history.big_limit);
