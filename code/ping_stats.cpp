@@ -120,7 +120,7 @@ update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
     h->small_limit += new_limit;
     
     h->big_avg   = (f32)h->big_sum   / (f32)h->filled_big;
-    h->small_avg = (f32)h->small_sum / (f32)h->filled_big;
+    h->small_avg = (f32)h->small_sum / (f32)h->filled_small;
     
     
     
@@ -181,7 +181,7 @@ int main(int argument_count, char **arguments)
     
     
     char domain[1024] = "google.com";
-    s32 ping_period = 1000;
+    s32 ping_timeout = 1000;
     s32 big_size = 60*60;
     s32 small_size = 60*2;
     s32 limit = 200;
@@ -231,10 +231,11 @@ int main(int argument_count, char **arguments)
             if (value <= 0)
             {
                 printf("incorrect numerical value: %s\n", arg);
+                exit(0);
             }
             else
             {
-                if (mode == InputMode_Timeout) ping_period = value;
+                if (mode == InputMode_Timeout) ping_timeout = value;
                 else if (mode == InputMode_Big) big_size = value;
                 else if (mode == InputMode_Small) small_size = value;
                 else if (mode == InputMode_Limit) limit = value;
@@ -246,25 +247,26 @@ int main(int argument_count, char **arguments)
     
     // NOTE: Prepare inputs and allocate memory
     small_size = Minimum(small_size, big_size);
+    limit = Minimum(ping_timeout - 1, limit);
     s32 *ping_array = (s32 *)malloc(big_size*sizeof(s32));
     History history = {};
     
-    printf("Starting with settings: small_size: %d, big_size %d, limit: %d\n"
+    printf("Starting with settings: small buffer size: %d, big buffer size: %d, limit: %d\n"
            "Target: %s\n",
            small_size, big_size, limit, domain);
     
     char command[2048];
-    snprintf(command, sizeof(command), "ping -n 1 -w %d %s", ping_period, domain); 
+    snprintf(command, sizeof(command), "ping -n 1 -w %d %s", ping_timeout, domain); 
     
     
     
-    u32 next_time_target = GetTickCount() + ping_period;
+    u32 next_time_target = GetTickCount() + ping_timeout;
     for (;;)
     {
         // NOTE: Do the pinging and process its output
         char command_result[1024];
         run_command(command, command_result, sizeof(command_result));
-        s32 ping = get_ping_value(command_result, ping_period);
+        s32 ping = get_ping_value(command_result, ping_timeout);
         update_history(&history, ping_array, big_size, small_size, limit, ping);
         
         
@@ -275,24 +277,24 @@ int main(int argument_count, char **arguments)
                "s_avg: %s%.0fms\t" COLOR_RESET 
                "s_lim: %s%d\t\t" COLOR_RESET 
                "b_avg: %s%.0fms\t" COLOR_RESET 
-               "b_lim: %s%d\n" COLOR_RESET, 
-               get_color((f32)ping, limit, color_mode),                     ping, 
-               get_color(history.small_avg, limit, color_mode),             history.small_avg,
-               get_color((f32)history.small_limit, small_size, color_mode), history.small_limit, 
-               get_color(history.big_avg, limit, color_mode),               history.big_avg, 
-               get_color((f32)history.big_limit, big_size, color_mode),     history.big_limit);
+               "b_lim: %s%d" COLOR_RESET "\n", 
+               get_color((f32)ping, limit, color_mode),                       ping, 
+               get_color(history.small_avg, limit, color_mode),               history.small_avg,
+               get_color((f32)history.small_limit, small_size/8, color_mode), history.small_limit, 
+               get_color(history.big_avg, limit, color_mode),                 history.big_avg, 
+               get_color((f32)history.big_limit, big_size/16, color_mode),    history.big_limit);
         
         
         
         // NOTE: Calculate sleep time and sleep until next ping.
         u32 current_time = GetTickCount();
         s32 time_to_sleep = (s32)(next_time_target - current_time);
-        if (time_to_sleep < -ping_period)
+        if (time_to_sleep < -ping_timeout)
         {
-            time_to_sleep = -ping_period;
+            time_to_sleep = -ping_timeout;
         }
         
-        next_time_target = current_time + time_to_sleep + ping_period;
+        next_time_target = current_time + time_to_sleep + ping_timeout;
         
         if (time_to_sleep > 0)
         {
