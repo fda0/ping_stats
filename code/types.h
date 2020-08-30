@@ -15,10 +15,6 @@ typedef s32 b32;
 typedef float f32;
 typedef double f64;
 
-#define internal static 
-#define global_variable static
-#define local_persist static
-
 #define Array_Count(Array) (sizeof(Array) / sizeof(*(Array)))
 
 #define Minimum(A, B) (A > B ? B : A)

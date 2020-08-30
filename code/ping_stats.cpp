@@ -1,9 +1,10 @@
 #include <windows.h>
 #include <stdio.h>
-#include <assert.h>
 #include "types.h"
+#include "colors.h"
 
-void run_command(const char* command, char *output, s32 output_size)
+static void 
+run_command(const char* command, char *output, s32 output_size)
 {
     output[0] = 0;
     
@@ -36,8 +37,10 @@ void run_command(const char* command, char *output, s32 output_size)
 }
 
 
-s32 get_ping_value(const char *command_result, s32 default_value)
+static s32 
+get_ping_value(const char *command_result, s32 default_value)
 {
+    // NOTE: Process MS Ping output
     const char time_tag[] = "time=";
     const char ttl_tag[] = "ms TTL";
     const char *time = strstr(command_result, time_tag);
@@ -49,8 +52,7 @@ s32 get_ping_value(const char *command_result, s32 default_value)
         s32 offset = sizeof(time_tag) - 1;
         time += offset;
         
-        char *test = 0;
-        ping = (s32)strtol(time, &test, 10);
+        ping = (s32)strtol(time, NULL, 10);
     }
     
     if (ping == 0)
@@ -69,18 +71,19 @@ struct History
     s32 current_index;
     
     s32 big_sum;
-    s32 big_avg;
     s32 big_limit;
+    f32 big_avg;
     
     s32 small_sum;
-    s32 small_avg;
     s32 small_limit;
+    f32 small_avg;
 };
 
-internal void
+static void
 update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
                s32 new_value)
 {
+    // NOTE: Decrement big range sum and limit coutners once array starts wrapping
     if (h->filled_big == big_size)
     {
         s32 last_value = values[h->current_index];
@@ -91,7 +94,7 @@ update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
     }
     else ++h->filled_big;
     
-    
+    // NOTE: Decrement small range sum and limit coutners once grows to small_size
     if (h->filled_small == small_size)
     {
         s32 last_index = h->current_index - small_size;
@@ -106,7 +109,7 @@ update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
     else ++h->filled_small;
     
     
-    
+    // NOTE: Add new ping value to sums and calculate if it is above limit.
     values[h->current_index] = new_value;
     
     h->big_sum += new_value;
@@ -116,8 +119,8 @@ update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
     h->big_limit += new_limit;
     h->small_limit += new_limit;
     
-    h->big_avg   = h->big_sum   / h->filled_big;
-    h->small_avg = h->small_sum / h->filled_big;
+    h->big_avg   = (f32)h->big_sum   / (f32)h->filled_big;
+    h->small_avg = (f32)h->small_sum / (f32)h->filled_big;
     
     
     
@@ -126,6 +129,26 @@ update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
         h->current_index = 0;
     }
 }
+
+
+static char *
+get_color(f32 value, s32 limit, bool colors_initialized)
+{
+    static char empty_string = 0;
+    if (!colors_initialized) return &empty_string;
+    
+    f32 limit_100 = (f32)limit;
+    f32 limit_75 = 0.75f*limit_100;
+    f32 limit_50 = 0.5f*limit_100;
+    f32 limit_25 = 0.25f*limit_100;
+    
+    if      (value > limit_100) return b_red;
+    else if (value > limit_75)  return f_red;
+    else if (value > limit_50)  return f_light_red;
+    else if (value > limit_25)  return f_yellow;
+    else                        return f_light_green;
+}
+
 
 enum Input_Mode
 {
@@ -138,6 +161,25 @@ enum Input_Mode
 
 int main(int argument_count, char **arguments)
 {
+    bool color_mode = false;
+    
+    { // SCOPE: Windows cmd color mode init.
+        HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (handle != INVALID_HANDLE_VALUE)
+        {
+            DWORD dwMode = 0;
+            if (GetConsoleMode(handle, &dwMode))
+            {
+                dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+                if (SetConsoleMode(handle, dwMode))
+                {
+                    color_mode = true;
+                }    
+            }
+        }
+    }
+    
+    
     char domain[1024] = "google.com";
     s32 ping_period = 1000;
     s32 big_size = 60*60;
@@ -146,6 +188,7 @@ int main(int argument_count, char **arguments)
     
     Input_Mode mode = InputMode_None;
     
+    // NOTE: Command line arguments handling
     for (s32 arg_index = 1;
          arg_index < argument_count;
          ++arg_index)
@@ -160,7 +203,7 @@ int main(int argument_count, char **arguments)
                 {
                     printf("Usage: pint_stats [-w timeout] [-b big_size]\n"
                            "                  [-s small_size] [-l limit]\n"
-                           "                  [target_domain_name]\n");
+                           "                  [target_address]\n");
                     exit(0);
                 }
                 else if (arg[1] == 'w') mode = InputMode_Timeout;
@@ -184,7 +227,7 @@ int main(int argument_count, char **arguments)
                  mode == InputMode_Small ||
                  mode == InputMode_Limit)
         {
-            s32 value = atoi(arg);
+            s32 value = (s32)strtol(arg, NULL, 10);
             if (value <= 0)
             {
                 printf("incorrect numerical value: %s\n", arg);
@@ -201,14 +244,14 @@ int main(int argument_count, char **arguments)
         }
     }
     
+    // NOTE: Prepare inputs and allocate memory
     small_size = Minimum(small_size, big_size);
     s32 *ping_array = (s32 *)malloc(big_size*sizeof(s32));
     History history = {};
     
     printf("Starting with settings: small_size: %d, big_size %d, limit: %d\n"
-           "domain: %s\n",
+           "Target: %s\n",
            small_size, big_size, limit, domain);
-    
     
     char command[2048];
     snprintf(command, sizeof(command), "ping -n 1 -w %d %s", ping_period, domain); 
@@ -218,16 +261,30 @@ int main(int argument_count, char **arguments)
     u32 next_time_target = GetTickCount() + ping_period;
     for (;;)
     {
-        // pinging
-        char command_result[512];
+        // NOTE: Do the pinging and process its output
+        char command_result[1024];
         run_command(command, command_result, sizeof(command_result));
         s32 ping = get_ping_value(command_result, ping_period);
         update_history(&history, ping_array, big_size, small_size, limit, ping);
         
-        // printing
-        printf("ping: %dms\ts_avg: %dms\ts_lim: %d\t\tb_avg: %dms\tb_lim: %d\n", ping, history.small_avg, history.small_limit, history.big_avg, history.big_limit);
         
-        // sleeping
+        // NOTE: Calculate colors and print the output
+#define COLOR_RESET "\033[39m""\033[49m"
+        
+        printf("ping: %s%dms\t" COLOR_RESET 
+               "s_avg: %s%.0fms\t" COLOR_RESET 
+               "s_lim: %s%d\t\t" COLOR_RESET 
+               "b_avg: %s%.0fms\t" COLOR_RESET 
+               "b_lim: %s%d\n" COLOR_RESET, 
+               get_color((f32)ping, limit, color_mode),                     ping, 
+               get_color(history.small_avg, limit, color_mode),             history.small_avg,
+               get_color((f32)history.small_limit, small_size, color_mode), history.small_limit, 
+               get_color(history.big_avg, limit, color_mode),               history.big_avg, 
+               get_color((f32)history.big_limit, big_size, color_mode),     history.big_limit);
+        
+        
+        
+        // NOTE: Calculate sleep time and sleep until next ping.
         u32 current_time = GetTickCount();
         s32 time_to_sleep = (s32)(next_time_target - current_time);
         if (time_to_sleep < -ping_period)
