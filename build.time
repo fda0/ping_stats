@@ -1,2 +1,3 @@
 #version 0.2
+#icon icon512.ico
 #build ping_stats.cpp
