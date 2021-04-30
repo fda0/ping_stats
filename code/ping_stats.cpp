@@ -1,7 +1,107 @@
 #include <windows.h>
 #include <stdio.h>
-#include "types.h"
-#include "colors.h"
+#include <stdint.h>
+
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef int64_t s64;
+typedef s32 b32;
+typedef float f32;
+typedef double f64;
+#define Array_Count(Array) (sizeof(Array) / sizeof(*(Array)))
+#define Minimum(A, B) (A > B ? B : A)
+
+enum Color
+{
+    Color_Normal,
+    Color_Red,
+    Color_Yellow,
+    Color_Green,
+    Color_LightRed,
+    Color_LightYellow,
+    Color_LightGreen,
+    Color_BackgroudRed,
+    Color_BackgroudYellow,
+    Color_Default, // gray reset
+    
+    Color_Count
+};
+
+struct Color_Value
+{
+    Color color;
+    char *text;
+};
+
+//~ NOTE: Globals
+static Color_Value color_values[Color_Count] = {
+    {Color_Normal, "\033[39m"},
+    {Color_Red, "\033[31m"},
+    {Color_Yellow, "\033[33m"},
+    {Color_Green, "\033[32m"},
+    {Color_LightRed, "\033[91m"},
+    {Color_LightYellow, "\033[93m"},
+    {Color_LightGreen, "\033[92m"},
+    {Color_BackgroudRed, "\033[39m\033[41m"},
+    {Color_BackgroudYellow, "\033[39m\033[43m"},
+    {Color_Default, "\033[90m\033[49m"},
+};
+
+static b32 are_colors_enabled = false;
+
+#define Help_Text \
+"ping_stats [-w timeout] [-l limit_threshold]\n"\
+"           [-s small_buffer_record_count] [-b big_buffer_record_count]\n"\
+"           [target_address]\n"
+
+
+
+
+///////////////////////////////
+inline char *
+get_color_text(Color color)
+{
+    char *result = "";
+    if (are_colors_enabled && color < Array_Count(color_values)) {
+        result = color_values[color].text;
+    }
+    return result;
+};
+
+
+static char *
+get_color(f32 value, s32 limit)
+{
+    f32 limit_100 = (f32)limit;
+    f32 limit_75 = 0.75f*limit_100;
+    f32 limit_50 = 0.5f*limit_100;
+    f32 limit_25 = 0.25f*limit_100;
+    
+    char *result = "";
+    
+    if (value > limit_100) {
+        result = get_color_text(Color_BackgroudRed);
+    } else if (value > limit_75) {
+        result = get_color_text(Color_Red);
+    } else if (value > limit_50) {
+        result = get_color_text(Color_LightRed);
+    } else if (value > limit_25) {
+        result = get_color_text(Color_Yellow);
+    } else {
+        result = get_color_text(Color_LightGreen);
+    }
+    
+    return result;
+}
+
+
+
+
 
 static void 
 run_command(const char* command, char *output, s32 output_size)
@@ -38,26 +138,25 @@ run_command(const char* command, char *output, s32 output_size)
 
 
 static s32 
-get_ping_value(const char *command_result, s32 default_value)
+get_ping_value(char *command_result, s32 default_value)
 {
+    s32 ping = default_value;
+    
     // NOTE: Process MS Ping output
-    const char time_tag[] = "time=";
-    const char ttl_tag[] = "ms TTL";
-    const char *time = strstr(command_result, time_tag);
-    const char *ttl = strstr(command_result, ttl_tag);
-    s32 ping = 0;
+    char time_tag[] = "time=";
+    char ttl_tag[] = "ms";
     
-    if ((time && ttl) && (ttl > time))
+    char *time = strstr(command_result, time_tag);
+    if (time)
     {
-        s32 offset = sizeof(time_tag) - 1;
-        time += offset;
-        
-        ping = (s32)strtol(time, NULL, 10);
-    }
-    
-    if (ping == 0)
-    {
-        ping = default_value;
+        char *ttl = strstr(command_result, ttl_tag);
+        if (ttl)
+        {
+            s32 offset = sizeof(time_tag) - 1;
+            time += offset;
+            
+            ping = (s32)strtol(time, NULL, 10);
+        }
     }
     
     return ping;
@@ -80,8 +179,7 @@ struct History
 };
 
 static void
-update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
-               s32 new_value)
+update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit, s32 new_value)
 {
     // NOTE: Decrement big range sum and limit coutners once array starts wrapping
     if (h->filled_big == big_size)
@@ -106,7 +204,10 @@ update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
         h->small_sum -= last_value;
         h->small_limit -= last_limit;
     }
-    else ++h->filled_small;
+    else
+    {
+        ++h->filled_small;
+    }
     
     
     // NOTE: Add new ping value to sums and calculate if it is above limit.
@@ -124,30 +225,11 @@ update_history(History *h, s32 *values, s32 big_size, s32 small_size, s32 limit,
     
     
     
-    if (++h->current_index >= big_size)
-    {
+    if (++h->current_index >= big_size) {
         h->current_index = 0;
     }
 }
 
-
-static char *
-get_color(f32 value, s32 limit, bool colors_initialized)
-{
-    static char empty_string = 0;
-    if (!colors_initialized) return &empty_string;
-    
-    f32 limit_100 = (f32)limit;
-    f32 limit_75 = 0.75f*limit_100;
-    f32 limit_50 = 0.5f*limit_100;
-    f32 limit_25 = 0.25f*limit_100;
-    
-    if      (value > limit_100) return b_red;
-    else if (value > limit_75)  return f_red;
-    else if (value > limit_50)  return f_light_red;
-    else if (value > limit_25)  return f_yellow;
-    else                        return f_light_green;
-}
 
 
 enum Input_Mode
@@ -161,9 +243,8 @@ enum Input_Mode
 
 int main(int argument_count, char **arguments)
 {
-    bool color_mode = false;
-    
-    { // SCOPE: Windows cmd color mode init.
+    {
+        // NOTE: Windows cmd color mode init.
         HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
         if (handle != INVALID_HANDLE_VALUE)
         {
@@ -173,7 +254,7 @@ int main(int argument_count, char **arguments)
                 dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
                 if (SetConsoleMode(handle, dwMode))
                 {
-                    color_mode = true;
+                    are_colors_enabled = true;
                 }    
             }
         }
@@ -201,9 +282,7 @@ int main(int argument_count, char **arguments)
             {
                 if (arg[0] == '?' || arg[1] == 'h' || arg[1] == '?')
                 {
-                    printf("Usage: pint_stats [-w timeout] [-b big_size]\n"
-                           "                  [-s small_size] [-l limit]\n"
-                           "                  [target_address]\n");
+                    printf(Help_Text);
                     exit(0);
                 }
                 else if (arg[1] == 'w') mode = InputMode_Timeout;
@@ -245,15 +324,29 @@ int main(int argument_count, char **arguments)
         }
     }
     
+    
+    
     // NOTE: Prepare inputs and allocate memory
     small_size = Minimum(small_size, big_size);
     limit = Minimum(ping_timeout - 1, limit);
     s32 *ping_array = (s32 *)malloc(big_size*sizeof(s32));
     History history = {};
     
-    printf("Starting with settings: small buffer size: %d, big buffer size: %d, limit: %d\n"
-           "Target: %s\n",
-           small_size, big_size, limit, domain);
+    printf(Help_Text);
+    printf("Settings:\n"
+           "target address: %s%s%s\n"
+           "timeout: %s%d%s\n"
+           "small buffer will hold %s%d%s records\n"
+           "big buffer will hold %s%d%s record\n"
+           "avg - average of the buffer\n"
+           "lim - number of records in buffer with value above %s%d%s\n"
+           "%s===============================================================================\n%s",
+           get_color_text(Color_LightYellow), domain, get_color_text(Color_Normal),
+           get_color_text(Color_LightYellow), ping_timeout, get_color_text(Color_Normal),
+           get_color_text(Color_LightGreen), small_size,  get_color_text(Color_Normal),
+           get_color_text(Color_LightGreen), big_size, get_color_text(Color_Normal),
+           get_color_text(Color_LightRed), limit, get_color_text(Color_Normal),
+           get_color_text(Color_Default), get_color_text(Color_Normal));
     
     char command[2048];
     snprintf(command, sizeof(command), "ping -n 1 -w %d %s", ping_timeout, domain); 
@@ -271,18 +364,30 @@ int main(int argument_count, char **arguments)
         
         
         // NOTE: Calculate colors and print the output
-#define COLOR_RESET "\033[39m""\033[49m"
-        
-        printf("ping: %s%dms\t" COLOR_RESET 
-               "s_avg: %s%.0fms\t" COLOR_RESET 
-               "s_lim: %s%d\t\t" COLOR_RESET 
-               "b_avg: %s%.0fms\t" COLOR_RESET 
-               "b_lim: %s%d" COLOR_RESET "\n", 
-               get_color((f32)ping, limit, color_mode),                       ping, 
-               get_color(history.small_avg, limit, color_mode),               history.small_avg,
-               get_color((f32)history.small_limit, small_size/8, color_mode), history.small_limit, 
-               get_color(history.big_avg, limit, color_mode),                 history.big_avg, 
-               get_color((f32)history.big_limit, big_size/16, color_mode),    history.big_limit);
+        printf("%s"
+               "ping: %s%3dms"
+               "%s    "
+               "small: {"
+               "avg: %s%3.0fms"
+               "%s; "
+               "lim: %s%3d"
+               "%s}    "
+               "big: {"
+               "avg: %s%3.0fms"
+               "%s; "
+               "lim: %s%3d"
+               "%s}\n",
+               get_color_text(Color_Normal),
+               get_color((f32)ping, limit), ping,
+               get_color_text(Color_Default),
+               get_color(history.small_avg, limit), history.small_avg,
+               get_color_text(Color_Default),
+               get_color((f32)history.small_limit, small_size/8), history.small_limit,
+               get_color_text(Color_Default),
+               get_color(history.big_avg, limit), history.big_avg,
+               get_color_text(Color_Default),
+               get_color((f32)history.big_limit, big_size/16), history.big_limit,
+               get_color_text(Color_Default));
         
         
         

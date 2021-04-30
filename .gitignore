@@ -1,2 +1,8 @@
 build/
+release/
+data/
+tools/
+__local*
+*.4coder
 *.rdbg
+*.exe
