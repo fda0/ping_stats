@@ -365,7 +365,7 @@ int main(int argument_count, char **arguments)
         
         // NOTE: Calculate colors and print the output
         printf("%s"
-               "ping: %s%3dms"
+               "ping: %s%4dms"
                "%s    "
                "small: {"
                "avg: %s%3.0fms"
